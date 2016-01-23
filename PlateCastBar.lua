@@ -40,6 +40,7 @@ local Textures = {
 	Font = "Interface\\AddOns\\".. AddOn .."\\Textures\\DorisPP.ttf",
 	CastBar = "Interface\\AddOns\\".. AddOn .."\\Textures\\LiteStep.tga",
 }
+
 _G[AddOn .. "_SavedVariables"] = {
 	["CastBar"] = {
 		["Width"] = 105,
@@ -71,6 +72,9 @@ _G[AddOn .. "_SavedVariables"] = {
 }
 
 local unitsToCheck = {
+	["mouseover"] = true,
+	["mouseovertarget"] = true,
+	["mouseovertargettarget"] = true,
 	["target"] = true,
 	["targettarget"] = true,
 	["targettargettarget"] = true,
@@ -210,12 +214,75 @@ local function CastBars_Create()
 	end
 end
 
+local function keepCastbar(unit, elapsed)
+	local Texture = _G[AddOn .. "_Texture_" .. unit .. "CastBar_CastBar"]
+	local CastTime = _G[AddOn .. "_FontString_" .. unit .. "CastBar_CastTime"]
+	local CastBar = _G[AddOn .. "_Frame_" .. unit .. "CastBar"]
+	local Border = _G[AddOn .. "_Texture_" .. unit .. "CastBar_Border"]
+	local IconBorder = _G[AddOn .. "_Texture_" .. unit .. "CastBar_IconBorder"]
+	local SpellName = _G[AddOn .. "_FontString_" .. unit .. "CastBar_SpellName"]
+	local CastTime = _G[AddOn .. "_FontString_" .. unit .. "CastBar_CastTime"]
+	local Icon = _G[AddOn .. "_Texture_" .. unit .. "CastBar_Icon"]
+	local Width = _G[AddOn .. "_SavedVariables"]["CastBar"]["Width"]
+	
+	if Texture.castTime and Texture.castTime < Texture.maxCastTime then
+		local total = string.format("%.2f",Texture.maxCastTime)
+		local left = string.format("%.1f",total - Texture.castTime/Texture.maxCastTime*total)
+		Texture:SetWidth(Width*(Texture.castTime/Texture.maxCastTime))
+		local point, relativeTo, relativePoint, xOfs, yOfs = Texture:GetPoint()
+		Texture:SetPoint(point, relativeTo, relativePoint, -Width/2+Width/2*Texture.castTime/Texture.maxCastTime, yOfs)
+		Texture:SetVertexColor(1, 0.5, 0)
+		if ( _G[AddOn .. "_SavedVariables"]["Timer"]["Format"] == "LEFT" ) then
+			CastTime:SetText(left)
+		elseif ( _G[AddOn .. "_SavedVariables"]["Timer"]["Format"] == "TOTAL" ) then
+			CastTime:SetText(total)
+		elseif ( _G[AddOn .. "_SavedVariables"]["Timer"]["Format"] == "BOTH" ) then
+			CastTime:SetText(left .. " /" .. total)
+		end
+		-- in case nameplate with matching name isn't found, hide castbar
+		local found = false
+		for plate, _ in pairs(Table["Nameplates"]) do
+			local hpborder, cbborder, cbicon, overlay, oldname, level, bossicon, raidicon = plate:GetRegions()
+			if(plate:IsVisible() and oldname:GetText() == CastBar.name) then
+				found = true
+				CastBar:SetPoint("TOP",hpborder,"BOTTOM",6,-4.5)
+				-- want castbars to disappear when a unit disappears/stops casting? delete 3 rows below
+				CastBar:SetParent(plate)
+				CastBar:SetAlpha(1)
+				CastBar:Show()
+			end
+		end
+		if not found then
+--			log("hiding castbar because no nameplate was found")
+			CastBar:SetAlpha(0)
+			CastBar:Hide()
+		end
+		Texture.castTime = Texture.castTime + elapsed
+		
+	elseif Texture.castTime and Texture.castTime > Texture.maxCastTime then
+--		log("hiding castbar because cast finished")
+		CastBar:SetAlpha(0)
+		CastBar:Hide()
+		Texture.castTime = Texture.castTime + elapsed
+	end
+end
+
+local function keepCastbars(elapsed)
+	for k,v in pairs(unitsToCheck) do
+	-- double check that fallback function is only used if no info is pulled for unit
+		if(not UnitCastingInfo(k)) then
+			keepCastbar(k, elapsed)
+		end
+	end
+end
+
 local function createCastbars(elapsed)
 	-- decide whether castbar should be showing or not
 	
 	for frame, _ in pairs(Table["Nameplates"]) do
-		local hpborder, cbborder, cbicon, overlay, oldname, level, bossicon, raidicon = frame:GetRegions()
 		if frame:IsVisible() then
+			local hpborder, cbborder, cbicon, overlay, oldname, level, bossicon, raidicon = frame:GetRegions()
+	
 			for k, v in pairs(unitsToCheck) do
 				local unit = k
 				local name = oldname:GetText()
@@ -261,7 +328,7 @@ local function createCastbars(elapsed)
 						CastTime:SetText(left .. " /" .. total)
 					end
 				-- hide castbar if unit stops casting
-				elseif ( not UnitCastingInfo(unit) ) then
+				elseif ( name == UnitName(unit) and not UnitCastingInfo(unit)) then
 	--				log("hiding castbar because unit stopped")
 					CastBar:SetAlpha(0)
 					CastBar:Hide()
@@ -269,6 +336,8 @@ local function createCastbars(elapsed)
 			end
 		end	
 	end
+	--fallback function in case no casting information was found but we still want to display progress on the bar
+	keepCastbars(elapsed)
 end
 
 local numChildren = -1
